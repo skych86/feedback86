@@ -1,0 +1,7 @@
+# node_modules 및 기타 무시할 파일들
+node_modules/
+.next/
+dist/
+.env
+.DS_Store
+Thumbs.db

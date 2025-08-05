@@ -48,6 +48,11 @@ NEXTAUTH_SECRET=your-nextauth-secret-key-change-this-in-production
 
 # JWT (if needed for additional functionality)
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+
+# Stripe (결제 시스템)
+STRIPE_SECRET_KEY=sk_test_your_stripe_secret_key
+STRIPE_PUBLISHABLE_KEY=pk_test_your_stripe_publishable_key
+STRIPE_WEBHOOK_SECRET=whsec_your_webhook_secret
 ```
 
 ### 4. MongoDB 설정
@@ -69,6 +74,7 @@ npm run dev
 ### 사용자 역할
 - **학생 (student)**: 문제를 풀고 답안을 제출할 수 있습니다.
 - **선생님 (teacher)**: 문제를 출제하고 학생들의 답안을 첨삭할 수 있습니다.
+- **관리자 (admin)**: 시스템 전체를 관리하고 통계를 확인할 수 있습니다.
 
 ### 인증 플로우
 1. **회원가입**: 사용자는 학생 또는 선생님으로 가입할 수 있습니다.
@@ -91,14 +97,21 @@ src/
 │   ├── (dashboard)/       # 대시보드 페이지
 │   │   ├── dashboard/     # 메인 대시보드 (역할별 리다이렉트)
 │   │   ├── student/       # 학생 대시보드
-│   │   └── teacher/       # 선생님 대시보드
+│   │   ├── teacher/       # 선생님 대시보드
+│   │   └── mypage/        # 마이페이지
+│   │       ├── student-history/ # 학생 첨삭 히스토리
+│   │       └── teacher-history/ # 선생님 첨삭 히스토리
 │   ├── api/               # API 라우트
 │   │   ├── auth/          # 인증 API
 │   │   │   ├── register/  # 회원가입 API
 │   │   │   └── [...nextauth]/ # NextAuth.js 핸들러
 │   │   ├── problems/      # 문제 관리 API
 │   │   ├── submissions/   # 답안 제출 API
-│   │   └── corrections/   # 첨삭 API
+│   │   ├── corrections/   # 첨삭 API
+│   │   ├── payment/       # 결제 API
+│   │   └── stripe/        # Stripe 결제 API
+│   │       ├── create-session/ # 결제 세션 생성
+│   │       └── webhook/   # 웹훅 처리
 │   └── globals.css        # 글로벌 스타일
 ├── components/             # React 컴포넌트
 │   ├── providers/         # Context Providers
@@ -106,10 +119,19 @@ src/
 │   ├── ui/                # UI 컴포넌트
 │   ├── auth/              # 인증 컴포넌트
 │   ├── student/           # 학생 관련 컴포넌트
+│   │   ├── PaymentButton.tsx # 기본 결제 버튼
+│   │   └── StripePaymentButton.tsx # Stripe 결제 버튼
 │   └── teacher/           # 선생님 관련 컴포넌트
 ├── lib/                   # 유틸리티 함수
-│   ├── db.ts             # 데이터베이스 연결
-│   └── auth.ts           # NextAuth 설정
+│   ├── db.ts             # MongoDB 연결
+│   ├── mongoose.ts       # Mongoose 연결
+│   ├── auth.ts           # NextAuth 설정
+│   ├── stripe.ts         # Stripe 설정 및 유틸리티
+│   └── paymentMiddleware.ts # 결제 상태 확인 미들웨어
+├── models/                # Mongoose 모델
+│   ├── User.ts           # 사용자 모델
+│   ├── Submission.ts     # 답안 제출 모델
+│   └── Correction.ts     # 첨삭 모델
 └── types/                 # TypeScript 타입 정의
     ├── index.ts          # 데이터베이스 모델 타입
     └── next-auth.d.ts   # NextAuth 타입 확장
@@ -118,8 +140,8 @@ src/
 ## 데이터베이스 모델
 
 ### User (사용자)
-- 학생과 선생님의 계정 정보
-- 이메일, 비밀번호, 이름, 역할 (student/teacher)
+- 학생, 선생님, 관리자의 계정 정보
+- 이메일, 비밀번호, 이름, 역할 (student/teacher/admin)
 
 ### Problem (문제)
 - 선생님이 출제하는 논술 문제
@@ -135,11 +157,17 @@ src/
 
 ### Correction (첨삭)
 - 선생님이 작성한 첨삭
-- 제출 ID, 선생님 ID, 첨삭 내용, 점수, 피드백
+- 학생 ID, 선생님 ID, 답안 ID, 첨삭 내용
+- Mongoose 모델로 구현됨 (`src/models/Correction.ts`)
 
 ### Notification (알림)
 - 사용자별 알림 정보
 - 알림 타입, 제목, 메시지, 읽음 상태
+
+### Payment (결제)
+- 학생이 첨삭 서비스를 위해 결제한 내역
+- 학생 ID, 답안 ID, 금액, 상태, 결제 수단
+- Stripe 결제 시스템과 연동되어 실제 결제 처리
 
 ## API 엔드포인트
 
@@ -168,9 +196,17 @@ src/
 
 ### 첨삭
 - `GET /api/corrections` - 첨삭 목록 조회 (역할별 필터링)
-- `POST /api/corrections` - 첨삭 작성 (선생님만)
+- `POST /api/corrections` - 첨삭 작성 (선생님만) - 기존 MongoDB collection과 Mongoose Correction 모델에 동시 생성
 - `GET /api/corrections/[id]` - 첨삭 상세 조회
 - `PUT /api/corrections/[id]` - 첨삭 수정
+
+### 첨삭 히스토리
+- `GET /api/corrections/student/[id]` - 학생별 첨삭 히스토리 조회
+- `GET /api/corrections/teacher/[id]` - 선생님별 첨삭 히스토리 조회
+
+### Mongoose 첨삭 (새로운 구현)
+- `GET /api/corrections-mongoose` - Mongoose 모델로 첨삭 목록 조회
+- `POST /api/corrections-mongoose` - Mongoose 모델로 첨삭 생성
 
 ### 선생님용 답안 목록
 - `GET /api/submissions/teacher` - 선생님이 첨삭할 답안 목록
@@ -186,6 +222,19 @@ src/
 - `GET /api/notifications` - 사용자 알림 조회
 - `POST /api/notifications` - 알림 생성
 - `PUT /api/notifications/mark-read` - 알림 읽음 처리
+
+### 관리자 API
+- `GET /api/admin/payments` - 결제 내역 조회 (관리자만)
+- `GET /api/admin/corrections` - 첨삭 내역 조회 (관리자만)
+- `GET /api/admin/users` - 사용자 목록 조회 (관리자만)
+- `PUT /api/admin/users` - 사용자 역할 변경 (관리자만)
+- `GET /api/admin/stats` - 통계 데이터 조회 (관리자만)
+
+### 결제 시스템 (Stripe)
+- `POST /api/payment/create` - 결제 생성
+- `POST /api/payment/update-status` - 결제 상태 업데이트
+- `POST /api/stripe/create-session` - Stripe 결제 세션 생성
+- `POST /api/stripe/webhook` - Stripe 웹훅 처리
 
 ## 개발 가이드
 
@@ -224,6 +273,9 @@ src/
 - `JWT_SECRET`: JWT 시크릿 키 (추가 기능용)
 - `EMAIL_USER`: 이메일 전송용 계정
 - `EMAIL_PASS`: 이메일 전송용 앱 비밀번호
+- `STRIPE_SECRET_KEY`: Stripe 시크릿 키
+- `STRIPE_PUBLISHABLE_KEY`: Stripe 퍼블릭 키
+- `STRIPE_WEBHOOK_SECRET`: Stripe 웹훅 시크릿
 
 ## 라이선스
 

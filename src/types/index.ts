@@ -6,7 +6,7 @@ export interface User {
   email: string;
   password: string; // hashed
   name: string;
-  role: 'student' | 'teacher';
+  role: 'student' | 'teacher' | 'admin';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -65,6 +65,19 @@ export interface Correction {
   updatedAt: Date;
 }
 
+// Payment Model (결제)
+export interface Payment {
+  _id: ObjectId;
+  studentId: ObjectId;
+  answerId: ObjectId; // Submission 모델 참조
+  amount: number;
+  status: 'pending' | 'paid' | 'failed';
+  method: string; // 결제 수단
+  transactionId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 // API Response Types
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -83,7 +96,7 @@ export interface RegisterRequest {
   email: string;
   password: string;
   name: string;
-  role: 'student' | 'teacher';
+  role: 'student' | 'teacher' | 'admin';
 }
 
 // Problem Types
@@ -117,6 +130,19 @@ export interface CreateCorrectionRequest {
   score: number;
   feedback: string;
   annotations?: PDFAnnotation[];
+}
+
+export interface CreateCorrectionResponse {
+  success: boolean;
+  message: string;
+  data: {
+    id: string;
+    mongooseCorrectionId: string | null;
+    submissionId: string;
+    content: string;
+    score: number;
+    feedback: string;
+  };
 }
 
 // PDF Annotation Types
@@ -167,4 +193,78 @@ export interface CreateNotificationRequest {
     problemId?: string;
     correctionId?: string;
   };
+}
+
+// Payment Types
+export interface CreatePaymentRequest {
+  studentId: string;
+  answerId: string;
+  amount: number;
+  method: string;
+}
+
+export interface UpdatePaymentStatusRequest {
+  paymentId: string;
+  status: 'pending' | 'paid' | 'failed';
+  transactionId?: string;
+}
+
+// CorrectionHistory Types
+export interface CorrectionHistoryItem {
+  id: string;
+  title: string;
+  feedback: string;
+  feedbackPreview: string;
+  date: string;
+  teacherName?: string;
+  teacherEmail?: string;
+  studentName?: string;
+  studentEmail?: string;
+  submissionContent: string;
+  problemTitle: string;
+}
+
+export interface CorrectionHistoryResponse {
+  success: boolean;
+  data: CorrectionHistoryItem[];
+  error?: string;
+}
+
+// Stripe Payment Types
+export interface CreateStripePaymentRequest {
+  studentId: string;
+  answerId: string;
+  amount: number;
+  successUrl: string;
+  cancelUrl: string;
+}
+
+export interface StripePaymentSessionResponse {
+  success: boolean;
+  data?: {
+    sessionId: string;
+    paymentId: string;
+  };
+  error?: string;
+}
+
+export interface StripeWebhookEvent {
+  id: string;
+  type: string;
+  data: {
+    object: {
+      id: string;
+      payment_intent?: string;
+      status?: string;
+      metadata?: {
+        paymentId?: string;
+      };
+    };
+  };
+}
+
+export interface UpdatePaymentFromStripeRequest {
+  paymentId: string;
+  stripePaymentIntentId: string;
+  status: 'paid' | 'failed';
 } 

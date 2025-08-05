@@ -21,6 +21,8 @@ export default function DashboardPage() {
       router.push('/student/dashboard');
     } else if (session.user.role === 'teacher') {
       router.push('/teacher/dashboard');
+    } else if (session.user.role === 'admin') {
+      router.push('/admin');
     }
   }, [session, status, router]);
 

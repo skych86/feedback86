@@ -4,6 +4,9 @@ import { authOptions } from '@/lib/auth';
 import clientPromise from '@/lib/db';
 import { CreateCorrectionRequest } from '@/types';
 import { sendCorrectionCompletedEmail } from '@/lib/email';
+import { paymentMiddleware } from '@/lib/paymentMiddleware';
+import dbConnect from '@/lib/mongoose';
+import Correction from '@/models/Correction';
 
 export async function POST(request: NextRequest) {
   try {
@@ -56,6 +59,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // 결제 상태 확인
+    const paymentCheck = await paymentMiddleware(request, submissionId);
+    if (paymentCheck) {
+      return paymentCheck;
+    }
+
     // 이미 첨삭이 완료된 답안인지 확인
     if (submission.status === 'completed') {
       return NextResponse.json(
@@ -64,7 +73,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 첨삭 생성
+    // Mongoose 연결
+    await dbConnect();
+
+    // 기존 Correction 모델에서 중복 확인
+    const existingCorrection = await Correction.findOne({
+      studentId: submission.studentId,
+      answerId: submissionId
+    });
+
+    if (existingCorrection) {
+      return NextResponse.json(
+        { error: '이미 해당 답안에 대한 첨삭이 존재합니다.' },
+        { status: 409 }
+      );
+    }
+
+    // 기존 MongoDB collection에 첨삭 생성
     const result = await db.collection('corrections').insertOne({
       submissionId,
       teacherId: session.user.id,
@@ -75,6 +100,31 @@ export async function POST(request: NextRequest) {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
+
+    // Mongoose Correction 모델에도 동시에 생성
+    let mongooseCorrectionId = null;
+    try {
+      const mongooseCorrection = new Correction({
+        studentId: submission.studentId,
+        teacherId: session.user.id,
+        answerId: submissionId,
+        feedback: feedback,
+        createdAt: new Date()
+      });
+
+      const savedCorrection = await mongooseCorrection.save();
+      mongooseCorrectionId = savedCorrection._id.toString();
+    } catch (mongooseError) {
+      console.error('Mongoose Correction creation error:', mongooseError);
+      
+      // Mongoose 생성 실패 시 기존 MongoDB collection에서도 롤백
+      await db.collection('corrections').deleteOne({ _id: result.insertedId });
+      
+      return NextResponse.json(
+        { error: '첨삭 저장 중 오류가 발생했습니다. 다시 시도해주세요.' },
+        { status: 500 }
+      );
+    }
 
     // 제출 답안 상태 업데이트
     await db.collection('submissions').updateOne(
@@ -135,6 +185,7 @@ export async function POST(request: NextRequest) {
         message: '첨삭이 성공적으로 완료되었습니다.',
         data: {
           id: result.insertedId.toString(),
+          mongooseCorrectionId: mongooseCorrectionId,
           submissionId,
           content,
           score,

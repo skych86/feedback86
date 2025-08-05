@@ -55,6 +55,12 @@ export default function StudentDashboardPage() {
             </div>
             <div className="flex items-center space-x-4">
               <NotificationBell />
+              <Link
+                href="/mypage"
+                className="text-blue-600 hover:text-blue-800 font-medium"
+              >
+                마이페이지
+              </Link>
               <span className="text-gray-700">
                 안녕하세요, {session.user.name}님!
               </span>
